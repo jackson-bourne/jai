@@ -9,8 +9,6 @@ on:
 
 env:
   LLVM_VERSION: '18'
-  # Windows: exact version for LLVM prebuilt archive URL (must match llvm-project release tag)
-  LLVM_WIN_VERSION: '18.1.8'
 
 jobs:
   test:
@@ -63,45 +61,11 @@ jobs:
           name: jai-linux-x86_64
           path: build/jai
 
-  release-windows:
-    name: Release (Windows)
-    runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install LLVM
-        shell: pwsh
-        run: |
-          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_WIN_VERSION/clang+llvm-$env:LLVM_WIN_VERSION-x86_64-pc-windows-msvc.tar.xz"
-          $out = "$env:RUNNER_TEMP\llvm.tar.xz"
-          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          tar -xJf $out -C $env:RUNNER_TEMP
-          $llvmRoot = "$env:RUNNER_TEMP\clang+llvm-$env:LLVM_WIN_VERSION-x86_64-pc-windows-msvc"
-          $llvmDir = "$llvmRoot\lib\cmake\llvm"
-          "LLVM_DIR=$llvmDir" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-          "$llvmRoot\bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-
-      - name: Configure and build
-        shell: pwsh
-        run: |
-          cmake -B build -DLLVM_DIR=$env:LLVM_DIR -A x64
-          cmake --build build --config Release
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: jai-windows-x86_64
-          path: build/Release/jai.exe
-
   release-publish:
     name: Publish Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release-linux, release-windows]
+    needs: [release-linux]
     permissions:
       contents: write
     steps:
@@ -110,25 +74,17 @@ jobs:
         with:
           name: jai-linux-x86_64
 
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: jai-windows-x86_64
-
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
           cp jai-linux-x86_64/jai release-assets/jai-linux-x86_64
-          cp jai-windows-x86_64/jai.exe release-assets/jai-windows-x86_64.exe
           chmod +x release-assets/jai-linux-x86_64
           ls -la release-assets/
 
       - name: Create Release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release-assets/jai-linux-x86_64
-            release-assets/jai-windows-x86_64.exe
+          files: release-assets/jai-linux-x86_64
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
         env:
