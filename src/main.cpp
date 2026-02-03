@@ -193,9 +193,14 @@ int main(int argc, char** argv) {
   }
 
   if (!exe_name.empty()) {
-    std::string cmd = "clang " + ir_path + " -o " + exe_name;
+    const char* linker = std::getenv("JAI_LINKER");
+    if (!linker || !*linker) linker = std::getenv("CC");
+    if (!linker || !*linker) linker = "clang";
+    const char* ldflags = std::getenv("LDFLAGS");
+    std::string cmd = std::string(linker) + " " + ir_path + " -o " + exe_name;
+    if (ldflags && *ldflags) cmd += " " + std::string(ldflags);
     if (std::system(cmd.c_str()) != 0) {
-      llvm::errs() << "jai: linking failed (run: clang " << ir_path << " -o " << exe_name << ")\n";
+      llvm::errs() << "jai: linking failed (run: " << cmd << ")\n";
       return 1;
     }
     std::remove(ir_path.c_str());

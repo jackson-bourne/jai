@@ -3,6 +3,12 @@ project(jai LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
+# Allow any linker: forward standard env flags (e.g. LDFLAGS) if set
+if(DEFINED ENV{LDFLAGS})
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " $ENV{LDFLAGS}")
+  string(APPEND CMAKE_SHARED_LINKER_FLAGS " $ENV{LDFLAGS}")
+endif()
+
 find_package(LLVM REQUIRED CONFIG)
 
 # Google Test

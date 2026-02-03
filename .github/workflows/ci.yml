@@ -9,6 +9,8 @@ on:
 
 env:
   LLVM_VERSION: '18'
+  # Windows: exact version for LLVM prebuilt archive URL (must match llvm-project release tag)
+  LLVM_WIN_VERSION: '18.1.8'
 
 jobs:
   test:
@@ -19,12 +21,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LLVM and Clang
+      - name: Install LLVM
         run: |
           wget -O - https://apt.llvm.org/llvm.sh | sudo bash -s ${LLVM_VERSION}
-          sudo apt-get install -y llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
+          sudo apt-get install -y llvm-${LLVM_VERSION}-dev
 
       - name: Configure and build
         run: |
@@ -36,24 +36,20 @@ jobs:
         run: |
           cd build && ctest --output-on-failure
 
-  release:
-    name: Release
+  release-linux:
+    name: Release (Linux)
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install LLVM and Clang
+      - name: Install LLVM
         run: |
           wget -O - https://apt.llvm.org/llvm.sh | sudo bash -s ${LLVM_VERSION}
-          sudo apt-get install -y llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
+          sudo apt-get install -y llvm-${LLVM_VERSION}-dev
 
       - name: Configure and build
         run: |
@@ -61,13 +57,78 @@ jobs:
             -DLLVM_DIR=/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm
           cmake --build build -j
 
-      - name: Prepare release asset
-        run: cp build/jai build/jai-linux-x86_64
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jai-linux-x86_64
+          path: build/jai
 
-      - name: Create Release and upload binary
+  release-windows:
+    name: Release (Windows)
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install LLVM
+        shell: pwsh
+        run: |
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_WIN_VERSION/clang+llvm-$env:LLVM_WIN_VERSION-x86_64-pc-windows-msvc.tar.xz"
+          $out = "$env:RUNNER_TEMP\llvm.tar.xz"
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          tar -xJf $out -C $env:RUNNER_TEMP
+          $llvmRoot = "$env:RUNNER_TEMP\clang+llvm-$env:LLVM_WIN_VERSION-x86_64-pc-windows-msvc"
+          $llvmDir = "$llvmRoot\lib\cmake\llvm"
+          "LLVM_DIR=$llvmDir" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          "$llvmRoot\bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -B build -DLLVM_DIR=$env:LLVM_DIR -A x64
+          cmake --build build --config Release
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jai-windows-x86_64
+          path: build/Release/jai.exe
+
+  release-publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-linux, release-windows]
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jai-linux-x86_64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jai-windows-x86_64
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp jai-linux-x86_64/jai release-assets/jai-linux-x86_64
+          cp jai-windows-x86_64/jai.exe release-assets/jai-windows-x86_64.exe
+          chmod +x release-assets/jai-linux-x86_64
+          ls -la release-assets/
+
+      - name: Create Release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
-          files: build/jai-linux-x86_64
+          files: |
+            release-assets/jai-linux-x86_64
+            release-assets/jai-windows-x86_64.exe
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
         env:
