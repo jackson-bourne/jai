@@ -1,0 +1,23 @@
+# Build
+build/
+out/
+
+# Compiler output (when no -o given)
+output.ll
+*.ll
+
+# IDE / editor
+.cache/
+*.swp
+*.swo
+*~
+
+# CTest
+Testing/
+DartConfiguration.tcl
+
+# macOS
+.DS_Store
+
+spec.md
+.vscode/

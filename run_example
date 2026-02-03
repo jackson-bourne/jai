@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <example> [args...]"
+  echo "  example: name (e.g. hello) or path (e.g. examples/hello.jai)"
+  exit 1
+fi
+
+example=$1
+shift
+
+if [[ -f "$example" ]]; then
+  src=$example
+else
+  src=examples/${example%.jai}.jai
+  if [[ ! -f "$src" ]]; then
+    echo "No such example: $src"
+    exit 1
+  fi
+fi
+
+out=/tmp/jai_example_$(basename "$src" .jai)
+compile_out=$(./build/jai "$src" -o "$out" 2>&1) || { echo "$compile_out" >&2; exit 1; }
+"$out" "$@"
