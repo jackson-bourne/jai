@@ -1,9 +1,79 @@
 #include "interpreter.hpp"
 #include "build_config.hpp"
 #include <cmath>
+#include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace jai {
+
+namespace {
+
+static void unescape_string(std::string& s) {
+  if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+    s = s.substr(1, s.size() - 2);
+  std::string out;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\\' && i + 1 < s.size()) {
+      switch (s[i + 1]) {
+        case 'n': out += '\n'; ++i; break;
+        case 't': out += '\t'; ++i; break;
+        case 'r': out += '\r'; ++i; break;
+        case '\\': out += '\\'; ++i; break;
+        case '"': out += '"'; ++i; break;
+        default: out += s[i]; break;
+      }
+    } else
+      out += s[i];
+  }
+  s = std::move(out);
+}
+
+// Format compile-time print args like printf so output matches runtime.
+void compile_time_print(std::string fmt, const std::vector<RunValue>& args) {
+  unescape_string(fmt);
+  std::ostringstream out;
+  size_t arg_idx = 0;
+  for (size_t i = 0; i < fmt.size(); ++i) {
+    if (fmt[i] == '%' && i + 1 < fmt.size()) {
+      ++i;
+      if (fmt[i] == '%') {
+        out << '%';
+        continue;
+      }
+      if (arg_idx >= args.size()) continue;
+      const RunValue& v = args[arg_idx++];
+      if (fmt[i] == 'l' && i + 2 < fmt.size() && fmt[i+1] == 'l' && fmt[i+2] == 'd') {
+        i += 2;
+        out << (v.tag == RunValue::Tag::F64 ? static_cast<int64_t>(v.f64) : v.i64);
+        continue;
+      }
+      switch (fmt[i]) {
+        case 'd':
+        case 'i':
+          out << (v.tag == RunValue::Tag::F64 ? static_cast<int64_t>(v.f64) : v.i64);
+          break;
+        case 'f':
+        case 'F':
+          out << (v.tag == RunValue::Tag::I64 ? static_cast<double>(v.i64) : v.f64);
+          break;
+        case 's':
+          out << (v.tag == RunValue::Tag::Str ? v.str_val : "");
+          break;
+        default:
+          out << '%' << fmt[i];
+          --arg_idx;
+          break;
+      }
+      continue;
+    }
+    out << fmt[i];
+  }
+  std::cout << out.str();
+  std::cout.flush();
+}
+
+}  // namespace
 
 CompileTimeEval::CompileTimeEval(File* file, SemaContext* sema)
     : file_(file), sema_(sema) {
@@ -95,6 +165,27 @@ bool CompileTimeEval::eval_expr(Expr& e, RunValue& out) {
     case Expr::Kind::Call: {
       if (!e.lhs || e.lhs->kind != Expr::Kind::Ident) return false;
       std::string name = e.lhs->ident;
+      if (name == "print") {
+        std::vector<RunValue> print_args;
+        for (size_t i = 0; i < e.args.size(); ++i) {
+          if (!e.args[i]) continue;
+          RunValue av;
+          if (!eval_expr(*e.args[i], av)) return false;
+          print_args.push_back(std::move(av));
+        }
+        if (!print_args.empty()) {
+          const RunValue& first = print_args[0];
+          if (first.tag == RunValue::Tag::Str) {
+            std::vector<RunValue> values(print_args.begin() + 1, print_args.end());
+            compile_time_print(first.str_val, values);
+          } else {
+            compile_time_print("%lld", print_args);
+          }
+        }
+        out.tag = RunValue::Tag::I64;
+        out.i64 = 0;
+        return true;
+      }
       if (name == "add_build_file") {
         if (e.args.size() >= 1 && e.args[0] && e.args[0]->kind == Expr::Kind::StringLiteral) {
           std::string path = e.args[0]->string_val;
@@ -352,6 +443,13 @@ RunValue evaluate_compile_time_function(const std::string& name, File* file, Sem
       return RunValue{};
     }
   }
+  return RunValue{};
+}
+
+RunValue evaluate_compile_time_expr(Expr& e, File* file, SemaContext* sema) {
+  CompileTimeEval eval(file, sema);
+  RunValue result;
+  if (eval.eval_expr(e, result)) return result;
   return RunValue{};
 }
 

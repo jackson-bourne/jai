@@ -188,6 +188,11 @@ void dump_decl(std::ostream& out, const Decl& d, int indent_level) {
     case Decl::Kind::DirectiveNoInline:
       out << "#no_inline " << d.directive_inline_proc << "\n";
       break;
+    case Decl::Kind::DirectiveExtern:
+      if (d.proc) {
+        out << "@extern " << d.proc->name << "(...) -> ...\n";
+      }
+      break;
     default:
       out << "Decl(unknown)\n";
   }

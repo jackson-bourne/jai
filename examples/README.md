@@ -7,6 +7,7 @@ Build the compiler from the project root, then run e.g.:
 
 - **hello.jai** – minimal print
 - **add.jai** – empty main (compile + run)
+- **function_calls.jai** – procedure definitions and calls (no args, one arg, return value)
 - **srgb_run.jai** – `#run` build(), compile-time array, for-range, print with format
 - **load_test.jai** / **multi_file.jai** – `#load` and shared constants (SHARED_CONST, EXTRA)
 - **loaded.jai** – used by load_test / multi_file (constants only; no main, link only when used via #load)

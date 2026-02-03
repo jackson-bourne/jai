@@ -35,6 +35,8 @@ class CodeGen {
   void emit_stmt(Stmt& s);
   void emit_decl(Decl& d);
   llvm::Function* get_or_declare_main();
+  llvm::Function* get_or_declare_proc(ProcDecl& p);
+  llvm::Function* get_or_declare_extern_proc(ProcDecl& p);
   void declare_print();
   void emit_type_table();
 

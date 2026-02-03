@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 static std::string read_file(const std::string& path) {
   std::ifstream f(path);
@@ -66,23 +67,26 @@ static bool expand_loads(jai::File* file, const std::string& base_dir,
   return true;
 }
 
-static bool run_build_if_present(jai::File* file, jai::SemaContext* sema) {
+static void run_all_directive_runs(jai::File* file, jai::SemaContext* sema) {
   for (auto& d : file->declarations) {
     if (!d || d->kind != jai::Decl::Kind::DirectiveRun || !d->directive_run_expr) continue;
     jai::Expr* e = d->directive_run_expr.get();
-    if (e->kind == jai::Expr::Kind::Call && e->lhs && e->lhs->kind == jai::Expr::Kind::Ident &&
-        e->lhs->ident == "build") {
-      jai::evaluate_compile_time_function("build", file, sema);
-      return true;
+    if (e->kind == jai::Expr::Kind::Call && e->lhs && e->lhs->kind == jai::Expr::Kind::Ident) {
+      std::string name = e->lhs->ident;
+      if (name == "build") {
+        jai::evaluate_compile_time_function("build", file, sema);
+        continue;
+      }
     }
+    (void) jai::evaluate_compile_time_expr(*e, file, sema);
   }
-  return false;
 }
 
 int main(int argc, char** argv) {
   bool dump_ast = false;
   std::string input_path;
   std::string output_path;
+  std::vector<std::string> link_libs;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -92,10 +96,15 @@ int main(int argc, char** argv) {
       llvm::outs() << "Usage: jai [options] <file.jai> [-o <output>]\n"
                    << "  --dump-ast, -d    Dump AST and exit\n"
                    << "  -o <file>        Write executable to <file>\n"
+                   << "  -l<lib>, --link <lib>  Link library (e.g. -lraylib)\n"
                    << "  --help, -h        Show this help\n";
       return 0;
     } else if (arg == "-o" && i + 1 < argc) {
       output_path = argv[++i];
+    } else if (arg == "--link" && i + 1 < argc) {
+      link_libs.push_back(argv[++i]);
+    } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'l') {
+      link_libs.push_back(arg.substr(2));
     } else if (!arg.empty() && arg[0] != '-') {
       input_path = arg;
     }
@@ -134,7 +143,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  run_build_if_present(file.get(), &sema);
+  run_all_directive_runs(file.get(), &sema);
 
   for (const std::string& build_path : jai::get_build_config().build_files) {
     std::string path = resolve_path(entry_dir, build_path);
@@ -198,6 +207,8 @@ int main(int argc, char** argv) {
     if (!linker || !*linker) linker = "clang";
     const char* ldflags = std::getenv("LDFLAGS");
     std::string cmd = std::string(linker) + " " + ir_path + " -o " + exe_name;
+    for (const std::string& lib : link_libs)
+      cmd += " -l" + lib;
     if (ldflags && *ldflags) cmd += " " + std::string(ldflags);
     if (std::system(cmd.c_str()) != 0) {
       llvm::errs() << "jai: linking failed (run: " << cmd << ")\n";

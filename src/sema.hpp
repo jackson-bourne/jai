@@ -52,6 +52,7 @@ struct SemaContext {
   Symbol* resolve_ident(const std::string& name);
   std::optional<int64_t> try_eval_int_const(const Expr& e);
   bool check_declaration(Decl& d);
+  bool check_declaration(Decl& d, bool register_proc_only);  // true = pass 1: register proc only
   bool check_statement(Stmt& s);
   bool check_expression(Expr& e, std::shared_ptr<Type>* out_type = nullptr);
   bool check_file(File& f);

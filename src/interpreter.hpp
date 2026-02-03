@@ -38,5 +38,6 @@ class CompileTimeEval {
 };
 
 RunValue evaluate_compile_time_function(const std::string& name, File* file, SemaContext* sema);
+RunValue evaluate_compile_time_expr(Expr& e, File* file, SemaContext* sema);
 
 }  // namespace jai

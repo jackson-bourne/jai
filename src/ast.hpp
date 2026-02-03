@@ -172,6 +172,7 @@ struct Decl {
     DirectiveLoad,
     DirectiveInline,
     DirectiveNoInline,
+    DirectiveExtern,
   };
   Kind kind = Kind::Invalid;
 

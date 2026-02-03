@@ -433,7 +433,7 @@ bool SemaContext::check_statement(Stmt& s) {
   }
 }
 
-bool SemaContext::check_declaration(Decl& d) {
+bool SemaContext::check_declaration(Decl& d, bool register_proc_only) {
   switch (d.kind) {
     case Decl::Kind::Var: {
       std::shared_ptr<Type> t;
@@ -550,6 +550,65 @@ bool SemaContext::check_declaration(Decl& d) {
     case Decl::Kind::Proc: {
       if (!d.proc) return false;
       ProcDecl& p = *d.proc;
+      if (register_proc_only) {
+        auto pt = std::make_unique<ProcType>();
+        pt->name = p.name;
+        for (auto& param : p.params) {
+          if (param.type)
+            pt->param_types.push_back(resolve_type_expr(*param.type));
+          else
+            pt->param_types.push_back(nullptr);
+        }
+        pt->return_type = p.return_type ? resolve_type_expr(*p.return_type) : type_int();
+        ProcType* ptp = pt.get();
+        procs_.push_back(std::move(pt));
+        auto fn_type = std::make_shared<Type>();
+        fn_type->kind = TypeKind::Procedure;
+        fn_type->name = p.name;
+        fn_type->proc_type = ptp;
+        if (scope) {
+          Symbol sym;
+          sym.kind = Symbol::Kind::Proc;
+          sym.name = p.name;
+          sym.type = fn_type;
+          sym.proc_decl = &p;
+          scope->add(p.name, std::move(sym));
+        }
+        return true;
+      }
+      Symbol* existing = scope ? scope->find(p.name) : nullptr;
+      ProcType* ptp = nullptr;
+      if (existing && existing->kind == Symbol::Kind::Proc && existing->proc_decl == &p && existing->type && existing->type->proc_type)
+        ptp = existing->type->proc_type;
+      if (!ptp) {
+        add_error(p.loc, "procedure '" + p.name + "' not registered (sema two-pass)");
+        return false;
+      }
+      Scope func_scope(scope);
+      scope = &func_scope;
+      for (size_t i = 0; i < p.params.size(); ++i) {
+        Symbol psym;
+        psym.kind = Symbol::Kind::Var;
+        psym.name = p.params[i].name;
+        psym.type = i < ptp->param_types.size() ? ptp->param_types[i] : nullptr;
+        scope->add(p.params[i].name, std::move(psym));
+      }
+      bool ok = p.body && check_statement(*p.body);
+      scope = func_scope.parent();
+      return ok;
+    }
+    case Decl::Kind::DirectiveRun:
+      if (d.directive_run_expr)
+        return check_expression(*d.directive_run_expr, nullptr);
+      return true;
+    case Decl::Kind::DirectiveLoad:
+    case Decl::Kind::DirectiveInline:
+    case Decl::Kind::DirectiveNoInline:
+      return true;
+    case Decl::Kind::DirectiveExtern: {
+      if (!d.proc) return false;
+      if (!register_proc_only) return true;  // already registered in pass 1
+      ProcDecl& p = *d.proc;
       auto pt = std::make_unique<ProcType>();
       pt->name = p.name;
       for (auto& param : p.params) {
@@ -573,27 +632,8 @@ bool SemaContext::check_declaration(Decl& d) {
         sym.proc_decl = &p;
         scope->add(p.name, std::move(sym));
       }
-      Scope func_scope(scope);
-      scope = &func_scope;
-      for (size_t i = 0; i < p.params.size(); ++i) {
-        Symbol psym;
-        psym.kind = Symbol::Kind::Var;
-        psym.name = p.params[i].name;
-        psym.type = i < ptp->param_types.size() ? ptp->param_types[i] : nullptr;
-        scope->add(p.params[i].name, std::move(psym));
-      }
-      bool ok = p.body && check_statement(*p.body);
-      scope = func_scope.parent();
-      return ok;
+      return true;
     }
-    case Decl::Kind::DirectiveRun:
-      if (d.directive_run_expr)
-        return check_expression(*d.directive_run_expr, nullptr);
-      return true;
-    case Decl::Kind::DirectiveLoad:
-    case Decl::Kind::DirectiveInline:
-    case Decl::Kind::DirectiveNoInline:
-      return true;
     default:
       return true;
   }
@@ -613,8 +653,13 @@ bool SemaContext::check_file(File& f) {
     type_table_sym.type = type_type_table();
     file_scope_.add("_type_table", std::move(type_table_sym));
   }
+  // Pass 1: register all procedures and extern declarations first so they can be referenced out of order.
   for (auto& d : f.declarations) {
-    if (d && !check_declaration(*d)) {}
+    if (d && (d->kind == Decl::Kind::Proc || d->kind == Decl::Kind::DirectiveExtern) && !check_declaration(*d, true)) {}
+  }
+  // Pass 2: full type-check all declarations (including procedure bodies).
+  for (auto& d : f.declarations) {
+    if (d && !check_declaration(*d, false)) {}
   }
   scope = &file_scope_;  // leave file scope so codegen can resolve constants/globals
   return errors.empty();

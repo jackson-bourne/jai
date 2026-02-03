@@ -33,6 +33,7 @@ class Parser {
   std::unique_ptr<Decl> parse_enum_decl();
   std::unique_ptr<Decl> parse_enum_decl_after_name(std::string name);
   std::unique_ptr<Decl> parse_directive();
+  std::unique_ptr<Decl> parse_extern_directive();
 
   std::unique_ptr<Stmt> parse_statement();
   std::unique_ptr<Stmt> parse_block();

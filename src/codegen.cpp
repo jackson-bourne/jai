@@ -99,6 +99,56 @@ llvm::Function* CodeGen::get_or_declare_main() {
   return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "main", module_.get());
 }
 
+llvm::Function* CodeGen::get_or_declare_proc(ProcDecl& p) {
+  auto it = functions_.find(p.name);
+  if (it != functions_.end()) return it->second;
+  std::vector<llvm::Type*> param_tys;
+  llvm::Type* ret_ty = llvm::Type::getInt32Ty(*context_);
+  if (sema_) {
+    Symbol* sym = sema_->resolve_ident(p.name);
+    if (sym && sym->kind == Symbol::Kind::Proc && sym->type && sym->type->proc_type) {
+      ProcType* pt = sym->type->proc_type;
+      if (pt->return_type) ret_ty = llvm_type(pt->return_type);
+      for (const auto& t : pt->param_types)
+        param_tys.push_back(llvm_type(t ? t : type_int()));
+    }
+  }
+  if (param_tys.empty() && p.params.size() > 0 && !sema_) {
+    for (size_t i = 0; i < p.params.size(); ++i)
+      param_tys.push_back(llvm::Type::getInt64Ty(*context_));
+  }
+  llvm::FunctionType* ft = llvm::FunctionType::get(ret_ty, param_tys, false);
+  llvm::Function* fn = llvm::Function::Create(
+      ft, llvm::Function::InternalLinkage, p.name, module_.get());
+  functions_[p.name] = fn;
+  return fn;
+}
+
+llvm::Function* CodeGen::get_or_declare_extern_proc(ProcDecl& p) {
+  auto it = functions_.find(p.name);
+  if (it != functions_.end()) return it->second;
+  std::vector<llvm::Type*> param_tys;
+  llvm::Type* ret_ty = llvm::Type::getInt32Ty(*context_);
+  if (sema_) {
+    Symbol* sym = sema_->resolve_ident(p.name);
+    if (sym && sym->kind == Symbol::Kind::Proc && sym->type && sym->type->proc_type) {
+      ProcType* pt = sym->type->proc_type;
+      if (pt->return_type) ret_ty = llvm_type(pt->return_type);
+      for (const auto& t : pt->param_types)
+        param_tys.push_back(llvm_type(t ? t : type_int()));
+    }
+  }
+  if (param_tys.empty() && p.params.size() > 0 && !sema_) {
+    for (size_t i = 0; i < p.params.size(); ++i)
+      param_tys.push_back(llvm::Type::getInt64Ty(*context_));
+  }
+  llvm::FunctionType* ft = llvm::FunctionType::get(ret_ty, param_tys, false);
+  llvm::Function* fn = llvm::Function::Create(
+      ft, llvm::Function::ExternalLinkage, p.name, module_.get());
+  functions_[p.name] = fn;
+  return fn;
+}
+
 void CodeGen::emit_type_table() {
   type_info_struct_ty_ = llvm::StructType::create(
       *context_, {llvm::Type::getInt32Ty(*context_), i8ptr(*context_)}, "Type_Info");
@@ -209,6 +259,8 @@ llvm::Value* CodeGen::emit_expr(Expr& e) {
       }
       if (e.ident == "_type_table" && type_table_global_)
         return type_table_global_;
+      auto fit = functions_.find(e.ident);
+      if (fit != functions_.end()) return fit->second;
       return nullptr;
     }
     case Expr::Kind::Binary: {
@@ -531,10 +583,18 @@ void CodeGen::emit_stmt(Stmt& s) {
     case Stmt::Kind::Return: {
       llvm::Value* v = nullptr;
       if (s.return_expr) v = emit_expr(*s.return_expr);
-      if (v)
+      if (v && current_function_) {
+        llvm::Type* ret_ty = current_function_->getReturnType();
+        if (v->getType() != ret_ty && ret_ty->isIntegerTy() && v->getType()->isIntegerTy())
+          v = builder_->CreateIntCast(v, ret_ty, true);
         builder_->CreateRet(v);
-      else
-        builder_->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*context_), 0));
+      } else if (current_function_) {
+        llvm::Type* ret_ty = current_function_->getReturnType();
+        if (ret_ty->isVoidTy())
+          builder_->CreateRetVoid();
+        else
+          builder_->CreateRet(llvm::ConstantInt::get(ret_ty, 0));
+      }
       break;
     }
     case Stmt::Kind::Defer:
@@ -598,16 +658,17 @@ void CodeGen::emit_decl(Decl& d) {
       if (!d.directive_inline_proc.empty())
         force_no_inline_procs_.insert(d.directive_inline_proc);
       break;
+    case Decl::Kind::DirectiveExtern:
+      // Extern procs are declared in the first pass; no body to emit.
+      break;
     case Decl::Kind::Proc: {
       if (!d.proc) return;
       ProcDecl& p = *d.proc;
-      if (p.name != "main") return;
-      llvm::Function* main_fn = get_or_declare_main();
-      // When multiple files define main (e.g. #load "loaded.jai" then main in this file),
-      // last main wins: replace any existing body.
-      if (!main_fn->empty()) {
+      llvm::Function* fn = (p.name == "main") ? get_or_declare_main() : get_or_declare_proc(p);
+      // When multiple files define main, last main wins: replace any existing body.
+      if (!fn->empty()) {
         std::vector<llvm::BasicBlock*> blocks;
-        for (llvm::BasicBlock& B : *main_fn)
+        for (llvm::BasicBlock& B : *fn)
           blocks.push_back(&B);
         for (llvm::BasicBlock* B : blocks)
           B->eraseFromParent();
@@ -615,16 +676,32 @@ void CodeGen::emit_decl(Decl& d) {
       bool want_inline = p.inline_requested || force_inline_procs_.count(p.name);
       bool want_no_inline = p.no_inline_requested || force_no_inline_procs_.count(p.name);
       if (want_inline)
-        main_fn->addFnAttr(llvm::Attribute::AlwaysInline);
+        fn->addFnAttr(llvm::Attribute::AlwaysInline);
       if (want_no_inline)
-        main_fn->addFnAttr(llvm::Attribute::NoInline);
-      llvm::BasicBlock* bb = llvm::BasicBlock::Create(*context_, "entry", main_fn);
+        fn->addFnAttr(llvm::Attribute::NoInline);
+      llvm::BasicBlock* bb = llvm::BasicBlock::Create(*context_, "entry", fn);
       builder_->SetInsertPoint(bb);
-      current_function_ = main_fn;
+      current_function_ = fn;
       locals_.clear();
+      // Allocate and store params into locals (params are passed as LLVM args).
+      for (size_t i = 0; i < p.params.size() && i < fn->arg_size(); ++i) {
+        llvm::Argument* arg = fn->getArg(static_cast<unsigned>(i));
+        llvm::Type* t = arg->getType();
+        llvm::Value* alloca = builder_->CreateAlloca(t, nullptr, p.params[i].name);
+        builder_->CreateStore(arg, alloca);
+        locals_[p.params[i].name] = alloca;
+      }
       if (p.body) emit_stmt(*p.body);
-      if (!builder_->GetInsertBlock()->getTerminator())
-        builder_->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*context_), 0));
+      llvm::BasicBlock* insert = builder_->GetInsertBlock();
+      if (!insert || !insert->getTerminator()) {
+        llvm::Type* ret_ty = fn->getReturnType();
+        if (ret_ty->isVoidTy())
+          builder_->CreateRetVoid();
+        else if (ret_ty->isIntegerTy(64))
+          builder_->CreateRet(llvm::ConstantInt::get(ret_ty, 0));
+        else
+          builder_->CreateRet(llvm::ConstantInt::get(ret_ty, 0));
+      }
       current_function_ = nullptr;
       break;
     }
@@ -638,6 +715,18 @@ bool CodeGen::run(File& file, SemaContext& sema) {
   sema_ = &sema;
   declare_print();
   emit_type_table();
+  // Declare all procedures and extern symbols first so calls can resolve before bodies are emitted.
+  // Create main first with ExternalLinkage/i32 so the linker finds it; other procs get InternalLinkage.
+  for (auto& d : file.declarations) {
+    if (d && d->kind == Decl::Kind::Proc && d->proc) {
+      if (d->proc->name == "main")
+        functions_["main"] = get_or_declare_main();
+      else
+        get_or_declare_proc(*d->proc);
+    }
+    if (d && d->kind == Decl::Kind::DirectiveExtern && d->proc)
+      get_or_declare_extern_proc(*d->proc);
+  }
   for (auto& d : file.declarations)
     if (d) emit_decl(*d);
 

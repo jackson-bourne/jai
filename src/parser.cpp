@@ -83,6 +83,18 @@ std::unique_ptr<File> Parser::parse_file() {
       if (d) file->declarations.push_back(std::move(d));
       continue;
     }
+    if (check(TokenKind::At)) {
+      advance();
+      if (check(TokenKind::Identifier) && current_.text == "extern") {
+        advance();
+        auto d = parse_extern_directive();
+        if (d) file->declarations.push_back(std::move(d));
+      } else {
+        add_error("expected @extern");
+        if (check(TokenKind::Identifier)) advance();
+      }
+      continue;
+    }
     auto decl = parse_declaration();
     if (decl) file->declarations.push_back(std::move(decl));
     else if (!has_errors()) break;  // EOF or recovery
@@ -354,6 +366,41 @@ std::unique_ptr<Decl> Parser::parse_directive() {
     return decl;
   }
   return nullptr;
+}
+
+std::unique_ptr<Decl> Parser::parse_extern_directive() {
+  SourceLoc loc = loc_from_token(current_);
+  if (!check(TokenKind::Identifier)) {
+    add_error("expected procedure name after @extern");
+    return nullptr;
+  }
+  std::string name(current_.text);
+  advance();
+  if (!expect(TokenKind::LParen)) {
+    add_error("expected ( for parameter list after @extern");
+    return nullptr;
+  }
+  auto proc = std::make_unique<ProcDecl>();
+  proc->loc = loc;
+  proc->name = std::move(name);
+  if (!check(TokenKind::RParen)) proc->params = parse_param_list();
+  if (!expect(TokenKind::RParen)) add_error("expected )");
+  if (check(TokenKind::Arrow)) {
+    advance();
+    proc->return_type = parse_type_expr();
+    if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
+  } else if (check(TokenKind::Minus) && lexer_.peek().kind == TokenKind::Greater) {
+    advance();
+    advance();
+    proc->return_type = parse_type_expr();
+    if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
+  }
+  if (!expect(TokenKind::Semicolon)) add_error("expected ; after @extern declaration");
+  auto decl = std::make_unique<Decl>();
+  decl->kind = Decl::Kind::DirectiveExtern;
+  decl->loc = loc;
+  decl->proc = std::move(proc);
+  return decl;
 }
 
 std::vector<Param> Parser::parse_param_list() {
