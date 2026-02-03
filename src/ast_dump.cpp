@@ -135,10 +135,10 @@ void dump_stmt(std::ostream& out, const Stmt& s, int indent_level) {
       if (s.for_iter_expr) dump_expr(out, *s.for_iter_expr, indent_level + 1);
       if (s.for_body) dump_stmt(out, *s.for_body, indent_level + 1);
       break;
-    case Stmt::Kind::While:
-      out << "While\n";
-      if (s.while_cond) dump_expr(out, *s.while_cond, indent_level + 1);
-      if (s.while_body) dump_stmt(out, *s.while_body, indent_level + 1);
+    case Stmt::Kind::Loop:
+      out << "Loop\n";
+      if (s.loop_cond) dump_expr(out, *s.loop_cond, indent_level + 1);
+      if (s.loop_body) dump_stmt(out, *s.loop_body, indent_level + 1);
       break;
     case Stmt::Kind::Return:
       out << "Return\n";
@@ -189,9 +189,10 @@ void dump_decl(std::ostream& out, const Decl& d, int indent_level) {
       out << "#no_inline " << d.directive_inline_proc << "\n";
       break;
     case Decl::Kind::DirectiveExtern:
-      if (d.proc) {
+      if (d.proc)
         out << "@extern " << d.proc->name << "(...) -> ...\n";
-      }
+      else if (d.var_type)
+        out << "@extern " << d.var_name << ": <type>\n";
       break;
     default:
       out << "Decl(unknown)\n";

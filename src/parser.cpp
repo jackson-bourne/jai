@@ -371,36 +371,51 @@ std::unique_ptr<Decl> Parser::parse_directive() {
 std::unique_ptr<Decl> Parser::parse_extern_directive() {
   SourceLoc loc = loc_from_token(current_);
   if (!check(TokenKind::Identifier)) {
-    add_error("expected procedure name after @extern");
+    add_error("expected name after @extern");
     return nullptr;
   }
   std::string name(current_.text);
   advance();
-  if (!expect(TokenKind::LParen)) {
-    add_error("expected ( for parameter list after @extern");
-    return nullptr;
-  }
-  auto proc = std::make_unique<ProcDecl>();
-  proc->loc = loc;
-  proc->name = std::move(name);
-  if (!check(TokenKind::RParen)) proc->params = parse_param_list();
-  if (!expect(TokenKind::RParen)) add_error("expected )");
-  if (check(TokenKind::Arrow)) {
-    advance();
-    proc->return_type = parse_type_expr();
-    if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
-  } else if (check(TokenKind::Minus) && lexer_.peek().kind == TokenKind::Greater) {
-    advance();
-    advance();
-    proc->return_type = parse_type_expr();
-    if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
-  }
-  if (!expect(TokenKind::Semicolon)) add_error("expected ; after @extern declaration");
   auto decl = std::make_unique<Decl>();
   decl->kind = Decl::Kind::DirectiveExtern;
   decl->loc = loc;
-  decl->proc = std::move(proc);
-  return decl;
+  if (check(TokenKind::ColonColon)) {
+    // Function: @extern Name :: (params) -> return_type;
+    advance();
+    if (!expect(TokenKind::LParen)) {
+      add_error("expected ( for parameter list after @extern name ::");
+      return nullptr;
+    }
+    auto proc = std::make_unique<ProcDecl>();
+    proc->loc = loc;
+    proc->name = std::move(name);
+    if (!check(TokenKind::RParen)) proc->params = parse_param_list();
+    if (!expect(TokenKind::RParen)) add_error("expected )");
+    if (check(TokenKind::Arrow)) {
+      advance();
+      proc->return_type = parse_type_expr();
+      if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
+    } else if (check(TokenKind::Minus) && lexer_.peek().kind == TokenKind::Greater) {
+      advance();
+      advance();
+      proc->return_type = parse_type_expr();
+      if (!proc->return_type) proc->return_type = std::make_unique<TypeExpr>();
+    }
+    if (!expect(TokenKind::Semicolon)) add_error("expected ; after @extern declaration");
+    decl->proc = std::move(proc);
+    return decl;
+  }
+  if (check(TokenKind::Colon)) {
+    // Variable: @extern name: Type;
+    advance();
+    decl->var_name = std::move(name);
+    decl->var_type = parse_type_expr();
+    if (!decl->var_type) add_error("expected type after @extern name:");
+    if (!expect(TokenKind::Semicolon)) add_error("expected ; after @extern variable");
+    return decl;
+  }
+  add_error("expected :: for function or : for variable after @extern name");
+  return nullptr;
 }
 
 std::vector<Param> Parser::parse_param_list() {
@@ -705,7 +720,7 @@ static bool is_member_name_token(TokenKind k) {
   if (k == TokenKind::Identifier) return true;
   switch (k) {
     case TokenKind::KwStruct: case TokenKind::KwEnum: case TokenKind::KwFor:
-    case TokenKind::KwIf: case TokenKind::KwElse: case TokenKind::KwWhile:
+    case TokenKind::KwIf: case TokenKind::KwElse: case TokenKind::KwLoop:
     case TokenKind::KwReturn: case TokenKind::KwInline: case TokenKind::KwNoInline:
     case TokenKind::KwDefer: case TokenKind::KwNew: case TokenKind::KwDelete:
     case TokenKind::KwCast: case TokenKind::KwThen: case TokenKind::KwTrue:
@@ -821,7 +836,7 @@ std::unique_ptr<Stmt> Parser::parse_block() {
 std::unique_ptr<Stmt> Parser::parse_statement() {
   if (check(TokenKind::KwIf)) return parse_if();
   if (check(TokenKind::KwFor)) return parse_for();
-  if (check(TokenKind::KwWhile)) return parse_while();
+  if (check(TokenKind::KwLoop)) return parse_loop();
   if (check(TokenKind::KwReturn)) return parse_return();
   if (check(TokenKind::KwDefer)) return parse_defer();
   if (check(TokenKind::LBrace)) return parse_block();
@@ -933,13 +948,15 @@ std::unique_ptr<Stmt> Parser::parse_for() {
   return s;
 }
 
-std::unique_ptr<Stmt> Parser::parse_while() {
-  if (!expect(TokenKind::KwWhile)) return nullptr;
+std::unique_ptr<Stmt> Parser::parse_loop() {
+  if (!expect(TokenKind::KwLoop)) return nullptr;
   auto s = std::make_unique<Stmt>();
-  s->kind = Stmt::Kind::While;
+  s->kind = Stmt::Kind::Loop;
   s->loc = loc_from_token(current_);
-  s->while_cond = parse_expr();
-  s->while_body = parse_statement();
+  s->loop_cond = parse_expr();
+  if (!s->loop_cond) add_error("expected condition after loop");
+  s->loop_body = parse_statement();
+  if (!s->loop_body) add_error("expected body after loop condition");
   return s;
 }
 

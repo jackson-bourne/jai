@@ -4,6 +4,7 @@
 #include "interpreter.hpp"
 #include "parser.hpp"
 #include "sema.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -87,6 +88,8 @@ int main(int argc, char** argv) {
   std::string input_path;
   std::string output_path;
   std::vector<std::string> link_libs;
+  std::vector<std::string> link_dirs;
+  std::vector<std::string> link_frameworks;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -96,11 +99,19 @@ int main(int argc, char** argv) {
       llvm::outs() << "Usage: jai [options] <file.jai> [-o <output>]\n"
                    << "  --dump-ast, -d    Dump AST and exit\n"
                    << "  -o <file>        Write executable to <file>\n"
+                   << "  -L <dir>         Add directory to library search path\n"
                    << "  -l<lib>, --link <lib>  Link library (e.g. -lraylib)\n"
+#ifdef __APPLE__
+                   << "  -framework <name>  Link macOS framework (e.g. -framework Cocoa)\n"
+#endif
                    << "  --help, -h        Show this help\n";
       return 0;
     } else if (arg == "-o" && i + 1 < argc) {
       output_path = argv[++i];
+    } else if (arg == "-L" && i + 1 < argc) {
+      link_dirs.push_back(argv[++i]);
+    } else if (arg == "-framework" && i + 1 < argc) {
+      link_frameworks.push_back(argv[++i]);
     } else if (arg == "--link" && i + 1 < argc) {
       link_libs.push_back(argv[++i]);
     } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'l') {
@@ -108,6 +119,33 @@ int main(int argc, char** argv) {
     } else if (!arg.empty() && arg[0] != '-') {
       input_path = arg;
     }
+  }
+
+#ifdef __APPLE__
+  // On macOS, raylib (via GLFW) needs system frameworks. Add them when linking -lraylib
+  // so the user doesn't have to pass -framework manually.
+  auto has_raylib = [&]() {
+    for (const auto& lib : link_libs)
+      if (lib == "raylib") return true;
+    return false;
+  };
+  if (has_raylib()) {
+    const char* raylib_frameworks[] = {
+      "CoreFoundation", "CoreGraphics", "IOKit", "Cocoa", "OpenGL", "QuartzCore", "CoreVideo"
+    };
+    for (const char* fw : raylib_frameworks) {
+      auto it = std::find(link_frameworks.begin(), link_frameworks.end(), fw);
+      if (it == link_frameworks.end())
+        link_frameworks.push_back(fw);
+    }
+  }
+#endif
+
+  // Include Testing/ in library search path so e.g. Testing/libraylib.a is found with -lraylib
+  if (!link_dirs.empty() || !link_libs.empty()) {
+    auto it = std::find(link_dirs.begin(), link_dirs.end(), "Testing");
+    if (it == link_dirs.end())
+      link_dirs.insert(link_dirs.begin(), "Testing");
   }
 
   if (input_path.empty()) {
@@ -207,8 +245,14 @@ int main(int argc, char** argv) {
     if (!linker || !*linker) linker = "clang";
     const char* ldflags = std::getenv("LDFLAGS");
     std::string cmd = std::string(linker) + " " + ir_path + " -o " + exe_name;
+    for (const std::string& dir : link_dirs)
+      cmd += " -L" + dir;
     for (const std::string& lib : link_libs)
       cmd += " -l" + lib;
+#ifdef __APPLE__
+    for (const std::string& fw : link_frameworks)
+      cmd += " -framework " + fw;
+#endif
     if (ldflags && *ldflags) cmd += " " + std::string(ldflags);
     if (std::system(cmd.c_str()) != 0) {
       llvm::errs() << "jai: linking failed (run: " << cmd << ")\n";

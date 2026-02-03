@@ -5,6 +5,7 @@ Build the compiler from the project root, then run e.g.:
 
 ## Programs that work end-to-end
 
+- **extern_raylib.jai** – `@extern` C symbols (GetRaylibVersion, RAYLIB_VERSION_MAJOR), link with raylib. **To test:** (1) Create `Testing/` in the project root and put `libraylib.a` there (build raylib with `cmake -DBUILD_SHARED_LIBS=OFF` and copy from `build/src/libraylib.a`). (2) From project root: `./build/jai examples/extern_raylib.jai -o extern_raylib -lraylib && ./extern_raylib` — you should see the raylib version string and major version. If you get “undefined symbol RAYLIB_VERSION_MAJOR”, remove that extern and its print (it’s often a C macro, not a symbol).
 - **hello.jai** – minimal print
 - **add.jai** – empty main (compile + run)
 - **function_calls.jai** – procedure definitions and calls (no args, one arg, return value)

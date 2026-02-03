@@ -501,11 +501,13 @@ void CodeGen::emit_stmt(Stmt& s) {
         builder_->CreateCondBr(cond, then_bb, merge_bb);
       builder_->SetInsertPoint(then_bb);
       emit_stmt(*s.if_then);
-      builder_->CreateBr(merge_bb);
+      if (!builder_->GetInsertBlock()->getTerminator())
+        builder_->CreateBr(merge_bb);
       if (else_bb) {
         builder_->SetInsertPoint(else_bb);
         emit_stmt(*s.if_else);
-        builder_->CreateBr(merge_bb);
+        if (!builder_->GetInsertBlock()->getTerminator())
+          builder_->CreateBr(merge_bb);
       }
       builder_->SetInsertPoint(merge_bb);
       break;
@@ -578,8 +580,27 @@ void CodeGen::emit_stmt(Stmt& s) {
       }
       break;
     }
-    case Stmt::Kind::While:
+    case Stmt::Kind::Loop: {
+      if (!s.loop_cond || !s.loop_body) break;
+      llvm::Function* f = builder_->GetInsertBlock()->getParent();
+      llvm::BasicBlock* cond_bb = llvm::BasicBlock::Create(*context_, "loop.cond", f);
+      llvm::BasicBlock* body_bb = llvm::BasicBlock::Create(*context_, "loop.body", f);
+      llvm::BasicBlock* after_bb = llvm::BasicBlock::Create(*context_, "loop.end", f);
+      builder_->CreateBr(cond_bb);
+      builder_->SetInsertPoint(cond_bb);
+      llvm::Value* cond_val = emit_expr(*s.loop_cond);
+      if (!cond_val) break;
+      llvm::Value* cond_bool = cond_val;
+      if (cond_val->getType()->isIntegerTy() && !cond_val->getType()->isIntegerTy(1))
+        cond_bool = builder_->CreateICmpNE(cond_val, llvm::ConstantInt::get(cond_val->getType(), 0));
+      builder_->CreateCondBr(cond_bool, body_bb, after_bb);
+      builder_->SetInsertPoint(body_bb);
+      emit_stmt(*s.loop_body);
+      if (!builder_->GetInsertBlock()->getTerminator())
+        builder_->CreateBr(cond_bb);
+      builder_->SetInsertPoint(after_bb);
       break;
+    }
     case Stmt::Kind::Return: {
       llvm::Value* v = nullptr;
       if (s.return_expr) v = emit_expr(*s.return_expr);
@@ -726,6 +747,13 @@ bool CodeGen::run(File& file, SemaContext& sema) {
     }
     if (d && d->kind == Decl::Kind::DirectiveExtern && d->proc)
       get_or_declare_extern_proc(*d->proc);
+    if (d && d->kind == Decl::Kind::DirectiveExtern && d->var_type) {
+      Symbol* sym = sema_ ? sema_->resolve_ident(d->var_name) : nullptr;
+      llvm::Type* ty = sym && sym->type ? llvm_type(sym->type) : llvm::Type::getInt64Ty(*context_);
+      llvm::GlobalVariable* gv = new llvm::GlobalVariable(
+          *module_, ty, false, llvm::GlobalValue::ExternalLinkage, nullptr, d->var_name);
+      globals_[d->var_name] = gv;
+    }
   }
   for (auto& d : file.declarations)
     if (d) emit_decl(*d);

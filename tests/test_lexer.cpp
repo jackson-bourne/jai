@@ -84,9 +84,10 @@ TEST(Lexer, Keywords) {
   EXPECT_EQ(lex_kinds("struct")[0], jai::TokenKind::KwStruct);
   EXPECT_EQ(lex_kinds("enum")[0], jai::TokenKind::KwEnum);
   EXPECT_EQ(lex_kinds("for")[0], jai::TokenKind::KwFor);
+  EXPECT_EQ(lex_kinds("loop")[0], jai::TokenKind::KwLoop);
   EXPECT_EQ(lex_kinds("if")[0], jai::TokenKind::KwIf);
   EXPECT_EQ(lex_kinds("else")[0], jai::TokenKind::KwElse);
-  EXPECT_EQ(lex_kinds("while")[0], jai::TokenKind::KwWhile);
+  EXPECT_EQ(lex_kinds("while")[0], jai::TokenKind::Identifier);  // Jai has no while keyword
   EXPECT_EQ(lex_kinds("return")[0], jai::TokenKind::KwReturn);
   EXPECT_EQ(lex_kinds("inline")[0], jai::TokenKind::KwInline);
   EXPECT_EQ(lex_kinds("no_inline")[0], jai::TokenKind::KwNoInline);

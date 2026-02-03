@@ -90,7 +90,7 @@ struct Stmt {
     If,
     ForRange,   // for i : 0..n-1
     ForIter,    // for container { }
-    While,
+    Loop,       // loop condition { body } - repeat until condition is false
     Return,
     Defer,
   };
@@ -114,8 +114,8 @@ struct Stmt {
   std::unique_ptr<Expr> for_iter_expr;
   std::unique_ptr<Stmt> for_body;
 
-  std::unique_ptr<Expr> while_cond;
-  std::unique_ptr<Stmt> while_body;
+  std::unique_ptr<Expr> loop_cond;
+  std::unique_ptr<Stmt> loop_body;
 
   std::unique_ptr<Expr> return_expr;
   std::unique_ptr<Stmt> defer_body;

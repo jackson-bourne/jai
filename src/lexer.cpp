@@ -8,8 +8,9 @@ namespace {
 
 const std::unordered_map<std::string_view, TokenKind> keywords = {
     {"struct", TokenKind::KwStruct},   {"enum", TokenKind::KwEnum},
-    {"for", TokenKind::KwFor},         {"if", TokenKind::KwIf},
-    {"else", TokenKind::KwElse},       {"while", TokenKind::KwWhile},
+    {"for", TokenKind::KwFor},         {"loop", TokenKind::KwLoop},
+    {"if", TokenKind::KwIf},
+    {"else", TokenKind::KwElse},
     {"return", TokenKind::KwReturn},   {"inline", TokenKind::KwInline},
     {"no_inline", TokenKind::KwNoInline}, {"defer", TokenKind::KwDefer},
     {"new", TokenKind::KwNew},         {"delete", TokenKind::KwDelete},

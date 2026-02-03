@@ -39,7 +39,7 @@ class Parser {
   std::unique_ptr<Stmt> parse_block();
   std::unique_ptr<Stmt> parse_if();
   std::unique_ptr<Stmt> parse_for();
-  std::unique_ptr<Stmt> parse_while();
+  std::unique_ptr<Stmt> parse_loop();
   std::unique_ptr<Stmt> parse_return();
   std::unique_ptr<Stmt> parse_defer();
 

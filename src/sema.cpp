@@ -418,10 +418,10 @@ bool SemaContext::check_statement(Stmt& s) {
       for_it_index_type.reset();
       return ok;
     }
-    case Stmt::Kind::While:
-      if (!s.while_cond || !check_expression(*s.while_cond, nullptr))
+    case Stmt::Kind::Loop:
+      if (!s.loop_cond || !check_expression(*s.loop_cond, nullptr))
         return false;
-      return s.while_body && check_statement(*s.while_body);
+      return s.loop_body && check_statement(*s.loop_body);
     case Stmt::Kind::Return:
       if (s.return_expr && !check_expression(*s.return_expr, nullptr))
         return false;
@@ -606,7 +606,24 @@ bool SemaContext::check_declaration(Decl& d, bool register_proc_only) {
     case Decl::Kind::DirectiveNoInline:
       return true;
     case Decl::Kind::DirectiveExtern: {
-      if (!d.proc) return false;
+      if (!d.proc) {
+        // Extern variable: @extern name: Type;
+        if (!register_proc_only) return true;  // already registered in pass 1
+        if (!d.var_type) return false;
+        std::shared_ptr<Type> t = resolve_type_expr(*d.var_type);
+        if (!t) {
+          add_error(d.loc, "invalid type for @extern variable");
+          return false;
+        }
+        if (scope) {
+          Symbol sym;
+          sym.kind = Symbol::Kind::Var;
+          sym.name = d.var_name;
+          sym.type = t;
+          scope->add(d.var_name, std::move(sym));
+        }
+        return true;
+      }
       if (!register_proc_only) return true;  // already registered in pass 1
       ProcDecl& p = *d.proc;
       auto pt = std::make_unique<ProcType>();
