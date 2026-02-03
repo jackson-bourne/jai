@@ -1,0 +1,74 @@
+name: CI and Release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*.*.*']
+  pull_request:
+    branches: ['**']
+
+env:
+  LLVM_VERSION: '18'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LLVM and Clang
+        run: |
+          wget -O - https://apt.llvm.org/llvm.sh | sudo bash -s ${LLVM_VERSION}
+          sudo apt-get install -y llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
+
+      - name: Configure and build
+        run: |
+          cmake -B build \
+            -DLLVM_DIR=/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm
+          cmake --build build -j
+
+      - name: Run tests
+        run: |
+          cd build && ctest --output-on-failure
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install LLVM and Clang
+        run: |
+          wget -O - https://apt.llvm.org/llvm.sh | sudo bash -s ${LLVM_VERSION}
+          sudo apt-get install -y llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
+
+      - name: Configure and build
+        run: |
+          cmake -B build \
+            -DLLVM_DIR=/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm
+          cmake --build build -j
+
+      - name: Prepare release asset
+        run: cp build/jai build/jai-linux-x86_64
+
+      - name: Create Release and upload binary
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/jai-linux-x86_64
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
