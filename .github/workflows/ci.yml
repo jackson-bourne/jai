@@ -77,7 +77,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          cp jai-linux-x86_64/jai release-assets/jai-linux-x86_64
+          cp jai release-assets/jai-linux-x86_64
           chmod +x release-assets/jai-linux-x86_64
           ls -la release-assets/
 
